@@ -72,7 +72,7 @@ public class SwerveModule {
     public void update() {
         if(MOTOR_FLIPPING){
             double delta = motor.getCurrentPosition()-lastWheel;
-            currentWheel += (wheelFlipped ? -1 : 1)*delta;
+            currentWheel +=delta*flipModifier();
             lastWheel = currentWheel;
         }
         double target = getTargetRotation(), current = getModuleRotation();
@@ -92,9 +92,12 @@ public class SwerveModule {
     public double getWheelPosition() {
         return DriveConstants.encoderTicksToInches(MOTOR_FLIPPING ? currentWheel : motor.getCurrentPosition());
     }
+    public int flipModifier(){
+        return MOTOR_FLIPPING && wheelFlipped ? -1 : 1;
+    }
 
     public double getWheelVelocity() {
-        return DriveConstants.encoderTicksToInches(motor.getVelocity());
+        return DriveConstants.encoderTicksToInches(flipModifier()*motor.getVelocity());
     }
 
     public void setMode(DcMotor.RunMode runMode) {
@@ -113,7 +116,7 @@ public class SwerveModule {
         //target check
         if(WAIT_FOR_TARGET && !isWithinAllowedError()) power = 0;
         //flip check
-        else if(MOTOR_FLIPPING) power*=(wheelFlipped ? -1 : 1);
+        else if(MOTOR_FLIPPING) power*=flipModifier();
         motor.setPower(power);
     }
 
