@@ -32,8 +32,12 @@ public class AbsoluteAnalogEncoder {
         return inverted;
     }
 
+    private double pastPosition = 1;
     public double getCurrentPosition() {
-        return encoder.getVoltage()*getDirection().getMultiplier()*Math.PI*2/2.3;
+        double pos = encoder.getVoltage()*getDirection().getMultiplier()*Math.PI*2/2.3;
+        //checks for crazy values when the encoder is close to zero
+        if(Math.abs(Angle.normDelta(pastPosition)) > 0.1 || Math.abs(Angle.normDelta(pos)) < 1) pastPosition = pos;
+        return pastPosition;
     }
 
 }

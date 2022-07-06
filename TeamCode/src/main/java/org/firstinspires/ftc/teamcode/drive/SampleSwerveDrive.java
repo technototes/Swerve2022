@@ -16,7 +16,6 @@ import androidx.annotation.NonNull;
 
 import com.acmerobotics.dashboard.config.Config;
 import com.acmerobotics.roadrunner.control.PIDCoefficients;
-import com.acmerobotics.roadrunner.control.PIDFController;
 import com.acmerobotics.roadrunner.drive.DriveSignal;
 import com.acmerobotics.roadrunner.drive.SwerveDrive;
 import com.acmerobotics.roadrunner.followers.HolonomicPIDVAFollower;
@@ -32,26 +31,17 @@ import com.acmerobotics.roadrunner.trajectory.constraints.TrajectoryAcceleration
 import com.acmerobotics.roadrunner.trajectory.constraints.TrajectoryVelocityConstraint;
 import com.qualcomm.hardware.bosch.BNO055IMU;
 import com.qualcomm.hardware.lynx.LynxModule;
-import com.qualcomm.robotcore.hardware.AnalogInput;
-import com.qualcomm.robotcore.hardware.CRServo;
-import com.qualcomm.robotcore.hardware.CRServoImplEx;
 import com.qualcomm.robotcore.hardware.DcMotor;
 import com.qualcomm.robotcore.hardware.DcMotorEx;
-import com.qualcomm.robotcore.hardware.DcMotorSimple;
 import com.qualcomm.robotcore.hardware.HardwareMap;
 import com.qualcomm.robotcore.hardware.PIDFCoefficients;
-import com.qualcomm.robotcore.hardware.PwmControl;
 import com.qualcomm.robotcore.hardware.VoltageSensor;
-import com.qualcomm.robotcore.hardware.configuration.typecontainers.MotorConfigurationType;
-import com.qualcomm.robotcore.util.ElapsedTime;
-import com.qualcomm.robotcore.util.Range;
 
+import org.firstinspires.ftc.teamcode.drive.opmode.SwerveModule;
 import org.firstinspires.ftc.teamcode.trajectorysequence.TrajectorySequence;
 import org.firstinspires.ftc.teamcode.trajectorysequence.TrajectorySequenceBuilder;
 import org.firstinspires.ftc.teamcode.trajectorysequence.TrajectorySequenceRunner;
 import org.firstinspires.ftc.teamcode.util.AbsoluteAnalogEncoder;
-import org.firstinspires.ftc.teamcode.util.CRServoProfiler;
-import org.firstinspires.ftc.teamcode.util.Encoder;
 import org.firstinspires.ftc.teamcode.util.LynxModuleUtil;
 
 import java.util.ArrayList;
@@ -66,11 +56,6 @@ public class SampleSwerveDrive extends SwerveDrive {
     public static PIDCoefficients TRANSLATIONAL_PID = new PIDCoefficients(8, 0, 0);
     public static PIDCoefficients HEADING_PID = new PIDCoefficients(8, 0, 0);
 
-    public static PIDCoefficients MODULE_PID = new PIDCoefficients(0.5, 0, 0.05);
-
-    public static CRServoProfiler.Constraints SERVO_CONSTRAINTS = new CRServoProfiler.Constraints(1, 1000, 2);
-
-
     public static double VX_WEIGHT = 1;
     public static double VY_WEIGHT = 1;
     public static double OMEGA_WEIGHT = 1;
@@ -84,20 +69,8 @@ public class SampleSwerveDrive extends SwerveDrive {
 
     private TrajectoryFollower follower;
 
-    private DcMotorEx leftFrontMotor, leftRearMotor, rightRearMotor, rightFrontMotor;
-    private List<DcMotorEx> motors;
-
-    private CRServo leftFrontServo, leftRearServo, rightRearServo, rightFrontServo;
-    private List<CRServo> servos;
-
-    private CRServoProfiler leftFrontProfiler, leftRearProfiler, rightRearProfiler, rightFrontProfiler;
-    private List<CRServoProfiler> profilers;
-
-    private AbsoluteAnalogEncoder leftFrontEncoder, leftRearEncoder, rightRearEncoder, rightFrontEncoder;
-    private List<AbsoluteAnalogEncoder> encoders;
-
-    private PIDFController leftFrontController, leftRearController, rightRearController, rightFrontController;
-    private List<PIDFController> controllers;
+    public SwerveModule leftFrontModule, leftRearModule, rightRearModule, rightFrontModule;
+    public List<SwerveModule> modules;
 
     private BNO055IMU imu;
     private VoltageSensor batteryVoltageSensor;
@@ -144,61 +117,18 @@ public class SampleSwerveDrive extends SwerveDrive {
         // For example, if +Y in this diagram faces downwards, you would use AxisDirection.NEG_Y.
         // BNO055IMUUtil.remapZAxis(imu, AxisDirection.NEG_Y);
 
-        leftFrontMotor = hardwareMap.get(DcMotorEx.class, "leftFrontMotor");
-        leftRearMotor = hardwareMap.get(DcMotorEx.class, "leftRearMotor");
-        rightRearMotor = hardwareMap.get(DcMotorEx.class, "rightRearMotor");
-        rightFrontMotor = hardwareMap.get(DcMotorEx.class, "rightFrontMotor");
 
-        motors = Arrays.asList(leftFrontMotor, leftRearMotor, rightRearMotor, rightFrontMotor);
+        leftFrontModule = new SwerveModule(hardwareMap, "leftFrontMotor", "leftFrontServo", "leftFrontEncoder");
+        leftRearModule = new SwerveModule(hardwareMap, "leftRearMotor", "leftRearServo", "leftRearEncoder");
+        rightRearModule = new SwerveModule(hardwareMap, "rightRearMotor", "rightRearServo", "rightRearEncoder");
+        rightFrontModule = new SwerveModule(hardwareMap, "rightFrontMotor", "rightFrontServo", "rightFrontEncoder");
 
-        for (DcMotorEx motor : motors) {
-            MotorConfigurationType motorConfigurationType = motor.getMotorType().clone();
-            motorConfigurationType.setAchieveableMaxRPMFraction(1.0);
-            motor.setMotorType(motorConfigurationType);
-        }
+        modules = Arrays.asList(leftFrontModule, leftRearModule, rightRearModule, rightFrontModule);
+
 
         if (RUN_USING_ENCODER) {
             setMode(DcMotor.RunMode.RUN_USING_ENCODER);
         }
-
-        leftFrontServo = hardwareMap.get(CRServoImplEx.class, "leftFrontServo");
-        leftRearServo = hardwareMap.get(CRServoImplEx.class, "leftRearServo");
-        rightRearServo = hardwareMap.get(CRServoImplEx.class, "rightRearServo");
-        rightFrontServo = hardwareMap.get(CRServoImplEx.class, "rightFrontServo");
-
-        servos = Arrays.asList(leftFrontServo, leftRearServo, rightRearServo, rightFrontServo);
-
-        for (CRServo s : servos) {
-            ((CRServoImplEx) s).setPwmRange(new PwmControl.PwmRange(1000, 2000));
-            s.setDirection(DcMotorSimple.Direction.REVERSE);
-
-        }
-
-        leftFrontProfiler = new CRServoProfiler(leftFrontServo, SERVO_CONSTRAINTS);
-        leftRearProfiler = new CRServoProfiler(leftRearServo, SERVO_CONSTRAINTS);
-        rightRearProfiler = new CRServoProfiler(rightRearServo, SERVO_CONSTRAINTS);
-        rightFrontProfiler = new CRServoProfiler(rightFrontServo, SERVO_CONSTRAINTS);
-
-
-        profilers = Arrays.asList(leftFrontProfiler, leftRearProfiler, rightRearProfiler, rightFrontProfiler);
-
-        leftFrontEncoder = new AbsoluteAnalogEncoder(hardwareMap.get(AnalogInput.class, "leftFrontEncoder")).zero(0);
-        leftRearEncoder = new AbsoluteAnalogEncoder(hardwareMap.get(AnalogInput.class, "leftRearEncoder")).zero(0);
-        rightRearEncoder = new AbsoluteAnalogEncoder(hardwareMap.get(AnalogInput.class, "rightRearEncoder")).zero(0);
-        rightFrontEncoder = new AbsoluteAnalogEncoder(hardwareMap.get(AnalogInput.class, "rightFrontEncoder")).zero(0);
-
-        encoders = Arrays.asList(leftFrontEncoder, leftRearEncoder, rightRearEncoder, rightFrontEncoder);
-
-        for(AbsoluteAnalogEncoder e : encoders){
-            e.setInverted(Encoder.Direction.REVERSE);
-        }
-
-        leftFrontController = new PIDFController(MODULE_PID);
-        leftRearController = new PIDFController(MODULE_PID);
-        rightRearController = new PIDFController(MODULE_PID);
-        rightFrontController = new PIDFController(MODULE_PID);
-
-        controllers = Arrays.asList(leftFrontController, leftRearController, rightRearController, rightFrontController);
 
 
         setZeroPowerBehavior(DcMotor.ZeroPowerBehavior.BRAKE);
@@ -278,17 +208,7 @@ public class SampleSwerveDrive extends SwerveDrive {
     }
 
     public void update() {
-        for(int i = 0; i < 4; i++){
-            PIDFController ctrl = controllers.get(i);
-            double target = ctrl.getTargetPosition(), current = getModuleOrientations().get(i);
-            if(current-target > Math.PI) current-=(2*Math.PI);
-            else if(target-current > Math.PI) current+=(2*Math.PI);
-            servos.get(i).setPower(Range.clip(ctrl.update(current), -MAX_SERVO, MAX_SERVO));
-        }
-//        double target = leftFrontController.getTargetPosition(), current = leftFrontEncoder.getCurrentPosition();
-//        if(current-target > Math.PI) current-=(2*Math.PI);
-//        else if(target-current > Math.PI) current+=(2*Math.PI);
-//        leftFrontServo.setPower(leftFrontController.update(current));
+        for (SwerveModule m : modules) m.update();
 
         updatePoseEstimate();
         DriveSignal signal = trajectorySequenceRunner.update(getPoseEstimate(), getPoseVelocity());
@@ -308,15 +228,12 @@ public class SampleSwerveDrive extends SwerveDrive {
     }
 
     public void setMode(DcMotor.RunMode runMode) {
-        for (DcMotorEx motor : motors) {
-            motor.setMode(runMode);
-        }
+        for (SwerveModule m : modules) m.setMode(runMode);
     }
 
     public void setZeroPowerBehavior(DcMotor.ZeroPowerBehavior zeroPowerBehavior) {
-        for (DcMotorEx motor : motors) {
-            motor.setZeroPowerBehavior(zeroPowerBehavior);
-        }
+        for (SwerveModule m : modules) m.setZeroPowerBehavior(zeroPowerBehavior);
+
     }
 
     public void setPIDFCoefficients(DcMotor.RunMode runMode, PIDFCoefficients coefficients) {
@@ -325,9 +242,7 @@ public class SampleSwerveDrive extends SwerveDrive {
                 coefficients.f * 12 / batteryVoltageSensor.getVoltage()
         );
 
-        for (DcMotorEx motor : motors) {
-            motor.setPIDFCoefficients(runMode, compensatedCoefficients);
-        }
+        for (SwerveModule m : modules) m.setPIDFCoefficients(runMode, compensatedCoefficients);
     }
 
     public void setWeightedDrivePower(Pose2d drivePower) {
@@ -354,27 +269,23 @@ public class SampleSwerveDrive extends SwerveDrive {
     @Override
     public List<Double> getWheelPositions() {
         List<Double> wheelPositions = new ArrayList<>();
-        for (DcMotorEx motor : motors) {
-            wheelPositions.add(encoderTicksToInches(motor.getCurrentPosition()));
-        }
+        for(SwerveModule m : modules) wheelPositions.add(m.getWheelPosition());
         return wheelPositions;
     }
 
     @Override
     public List<Double> getWheelVelocities() {
         List<Double> wheelVelocities = new ArrayList<>();
-        for (DcMotorEx motor : motors) {
-            wheelVelocities.add(encoderTicksToInches(motor.getVelocity()));
-        }
+        for(SwerveModule m : modules) wheelVelocities.add(m.getWheelVelocity());
         return wheelVelocities;
     }
 
     @Override
     public void setMotorPowers(double v, double v1, double v2, double v3) {
-        leftFrontMotor.setPower(v);
-        leftRearMotor.setPower(v1);
-        rightRearMotor.setPower(v2);
-        rightFrontMotor.setPower(v3);
+        leftFrontModule.setMotorPower(v);
+        leftRearModule.setMotorPower(v1);
+        rightRearModule.setMotorPower(v2);
+        rightFrontModule.setMotorPower(v3);
     }
 
     @Override
@@ -407,32 +318,25 @@ public class SampleSwerveDrive extends SwerveDrive {
     @Override
     public List<Double> getModuleOrientations() {
         List<Double> moduleOrientations = new ArrayList<>();
-        for (AbsoluteAnalogEncoder encoder : encoders) {
-            moduleOrientations.add(encoder.getCurrentPosition());
-        }
-//        for (int i = 0; i < 4; i++) {
-//
-//            moduleOrientations.add(profilers.get(i).currentPos);
-//
-//        }
+        for(SwerveModule m : modules) moduleOrientations.add(m.getModuleRotation());
+
         return moduleOrientations;
     }
 
 
     @Override
     public void setModuleOrientations(double v, double v1, double v2, double v3) {
-        leftFrontController.setTargetPosition(v);
-        leftRearController.setTargetPosition(v1);
-        rightRearController.setTargetPosition(v2);
-        rightFrontController.setTargetPosition(v3);
-        System.out.println("fl"+(int)v+"rl"+(int)v1+"rr"+(int)v2+"fr"+(int)v3);
+        leftFrontModule.setTargetRotation(v);
+        leftRearModule.setTargetRotation(v1);
+        rightRearModule.setTargetRotation(v2);
+        rightFrontModule.setTargetRotation(v3);
     }
 
     public void setModuleVelocities(double v, double v1, double v2, double v3) {
-        leftFrontProfiler.setTarget(v);
-        leftRearProfiler.setTarget(v1);
-        rightRearProfiler.setTarget(v2);
-        rightFrontProfiler.setTarget(v3);
+        leftFrontModule.setServoPower(v);
+        leftRearModule.setServoPower(v1);
+        rightRearModule.setServoPower(v2);
+        rightFrontModule.setServoPower(v3);
 
     }
 }
