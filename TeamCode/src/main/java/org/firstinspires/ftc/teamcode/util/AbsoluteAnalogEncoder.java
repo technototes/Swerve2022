@@ -7,6 +7,7 @@ import com.qualcomm.robotcore.hardware.AnalogInput;
 @Config
 public class AbsoluteAnalogEncoder {
     public static double DEFAULT_RANGE = 3.3;
+    public static boolean VALUE_REJECTION = false;
     private final AnalogInput encoder;
     private double offset, analogRange;
     private Encoder.Direction inverted;
@@ -34,9 +35,9 @@ public class AbsoluteAnalogEncoder {
 
     private double pastPosition = 1;
     public double getCurrentPosition() {
-        double pos = encoder.getVoltage()*getDirection().getMultiplier()*Math.PI*2/2.3;
+        double pos = Angle.norm(encoder.getVoltage()*getDirection().getMultiplier()*Math.PI*2/2.3);
         //checks for crazy values when the encoder is close to zero
-        if(Math.abs(Angle.normDelta(pastPosition)) > 0.1 || Math.abs(Angle.normDelta(pos)) < 1) pastPosition = pos;
+        if(!VALUE_REJECTION || Math.abs(Angle.normDelta(pastPosition)) > 0.1 || Math.abs(Angle.normDelta(pos)) < 1) pastPosition = pos;
         return pastPosition;
     }
 

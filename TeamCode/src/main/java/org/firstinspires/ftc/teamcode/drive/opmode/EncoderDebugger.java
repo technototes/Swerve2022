@@ -33,8 +33,12 @@ public class EncoderDebugger extends LinearOpMode {
         telemetry.setDisplayFormat(Telemetry.DisplayFormat.HTML);
         while (!isStopRequested()) {
             for(double d : drive.getModuleOrientations()){
-                telemetry.addLine(d+"");
+                telemetry.addLine(d+"enc");
             }
+            for(double d : drive.getWheelPositions()){
+                telemetry.addLine(d+"enc");
+            }
+
             telemetry.update();
         }
     }

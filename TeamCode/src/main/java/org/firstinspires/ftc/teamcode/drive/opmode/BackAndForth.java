@@ -29,7 +29,7 @@ import org.firstinspires.ftc.teamcode.drive.SampleSwerveDrive;
 @Autonomous(group = "drive")
 public class BackAndForth extends LinearOpMode {
 
-    public static double DISTANCE = 50;
+    public static double DISTANCE = 20;
 
     @Override
     public void runOpMode() throws InterruptedException {

@@ -1,8 +1,10 @@
-package org.firstinspires.ftc.teamcode.util;
+package org.firstinspires.ftc.teamcode.drive;
 
 import com.acmerobotics.dashboard.config.Config;
 import com.acmerobotics.roadrunner.control.PIDCoefficients;
 import com.acmerobotics.roadrunner.control.PIDFController;
+import com.acmerobotics.roadrunner.geometry.Pose2d;
+import com.acmerobotics.roadrunner.geometry.Vector2d;
 import com.acmerobotics.roadrunner.util.Angle;
 import com.qualcomm.robotcore.hardware.AnalogInput;
 import com.qualcomm.robotcore.hardware.CRServo;
@@ -23,18 +25,24 @@ import org.firstinspires.ftc.teamcode.util.Encoder;
 
 @Config
 public class SwerveModule {
-    public static PIDCoefficients MODULE_PID = new PIDCoefficients(0.5, 0, 0.05);
+    public static PIDCoefficients MODULE_PID = new PIDCoefficients(0.4, 0, 0.05);
+
+    public static double FEEDFORWARD = 0.1;
 
     public static CRServoProfiler.Constraints SERVO_CONSTRAINTS = new CRServoProfiler.Constraints(1, 1000, 2);
 
-    public static double MAX_SERVO = 1;
+    public static double MAX_SERVO = 1, MAX_MOTOR = 1;
 
     //EXPERIMENTAL FEATURES
-    public static boolean WAIT_FOR_TARGET = true;
+    public static boolean WAIT_FOR_TARGET = false;
 
-    public static double ALLOWED_ERROR = Math.toRadians(10);
+    public static double ALLOWED_COS_ERROR = Math.toRadians(2);
+
+    public static double ALLOWED_SERVO_STOP_ERROR = Math.toRadians(2);
 
     public static boolean MOTOR_FLIPPING = true;
+
+    public static double FLIP_BIAS = Math.toRadians(0);
 
 
     private DcMotorEx motor;
@@ -44,12 +52,11 @@ public class SwerveModule {
     private CRServoProfiler rotationProfiler;
 
     private boolean wheelFlipped = false;
-    private double lastWheel = 0, currentWheel = 0;
 
     public SwerveModule(DcMotorEx m, CRServo s, AbsoluteAnalogEncoder e) {
         motor = m;
         MotorConfigurationType motorConfigurationType = motor.getMotorType().clone();
-        motorConfigurationType.setAchieveableMaxRPMFraction(1.0);
+        motorConfigurationType.setAchieveableMaxRPMFraction(MAX_MOTOR);
         motor.setMotorType(motorConfigurationType);
 
         servo = s;
@@ -59,8 +66,9 @@ public class SwerveModule {
         encoder = e;
         e.setInverted(Encoder.Direction.REVERSE);
 
-        rotationController = new PIDFController(MODULE_PID);
+        rotationController = new PIDFController(MODULE_PID, 0, 0, FEEDFORWARD);
         rotationProfiler = new CRServoProfiler(servo, SERVO_CONSTRAINTS);
+        motor.setMode(DcMotor.RunMode.STOP_AND_RESET_ENCODER);
     }
 
     public SwerveModule(HardwareMap hardwareMap, String mName, String sName, String eName) {
@@ -70,15 +78,11 @@ public class SwerveModule {
     }
 
     public void update() {
-        if(MOTOR_FLIPPING){
-            double delta = motor.getCurrentPosition()-lastWheel;
-            currentWheel +=delta*flipModifier();
-            lastWheel = currentWheel;
-        }
         double target = getTargetRotation(), current = getModuleRotation();
         if (current - target > Math.PI) current -= (2 * Math.PI);
         else if (target - current > Math.PI) current += (2 * Math.PI);
-        servo.setPower(Range.clip(rotationController.update(current), -MAX_SERVO, MAX_SERVO));
+        double power = Range.clip(rotationController.update(current), -MAX_SERVO, MAX_SERVO);
+        servo.setPower(Math.abs(rotationController.getLastError()) > ALLOWED_SERVO_STOP_ERROR ? power : 0);
     }
 
     public double getTargetRotation() {
@@ -90,14 +94,14 @@ public class SwerveModule {
     }
 
     public double getWheelPosition() {
-        return DriveConstants.encoderTicksToInches(MOTOR_FLIPPING ? currentWheel : motor.getCurrentPosition());
+        return DriveConstants.encoderTicksToInches(motor.getCurrentPosition());
     }
     public int flipModifier(){
-        return MOTOR_FLIPPING && wheelFlipped ? -1 : 1;
+        return MOTOR_FLIPPING && wheelFlipped ? 1 : -1;
     }
 
     public double getWheelVelocity() {
-        return DriveConstants.encoderTicksToInches(flipModifier()*motor.getVelocity());
+        return DriveConstants.encoderTicksToInches(motor.getVelocity());
     }
 
     public void setMode(DcMotor.RunMode runMode) {
@@ -114,7 +118,9 @@ public class SwerveModule {
 
     public void setMotorPower(double power) {
         //target check
-        if(WAIT_FOR_TARGET && !isWithinAllowedError()) power = 0;
+        if(WAIT_FOR_TARGET && !isWithinAllowedError()){
+            power*=Math.cos(Range.clip(rotationController.getLastError(), -Math.PI/2, Math.PI/2));
+        }
         //flip check
         else if(MOTOR_FLIPPING) power*=flipModifier();
         motor.setPower(power);
@@ -122,7 +128,7 @@ public class SwerveModule {
 
     public boolean isWithinAllowedError(){
         double error = Math.abs(rotationController.getLastError());
-        return error < ALLOWED_ERROR || error > 2*Math.PI - ALLOWED_ERROR;
+        return error < ALLOWED_COS_ERROR || error > 2*Math.PI - ALLOWED_COS_ERROR;
     }
 
     public void setServoPower(double power) {
@@ -130,16 +136,44 @@ public class SwerveModule {
     }
 
     public void setTargetRotation(double target) {
-        if (MOTOR_FLIPPING) {
-            double current = getModuleRotation();
-            //normalize for wraparound
-            if (current - target > Math.PI) current -= (2 * Math.PI);
-            else if (target - current > Math.PI) current += (2 * Math.PI);
+        double current = getModuleRotation();
+        //normalize for wraparound
+        if (current - target > Math.PI) current -= (2 * Math.PI);
+        else if (target - current > Math.PI) current += (2 * Math.PI);
 
-            //flip target
-            wheelFlipped = Math.abs(current - target) > Math.PI / 2;
-            if (wheelFlipped) target = Angle.norm(target + Math.PI / 2);
+        if (MOTOR_FLIPPING) {
+                //flip target
+            wheelFlipped = Math.abs(current - target) > (Math.PI / 2 - flipModifier()*FLIP_BIAS);
+            if (wheelFlipped) target = Angle.norm(target + Math.PI);
         }
         rotationController.setTargetPosition(target);
+    }
+    public SwerveModuleState asState(){
+        return new SwerveModuleState(this);
+    }
+
+    public static class SwerveModuleState {
+        public SwerveModule module;
+        public double wheelPos, podRot;
+        public SwerveModuleState(SwerveModule s){
+            module = s;
+            wheelPos = 0;
+            podRot = 0;
+        }
+
+        public SwerveModuleState update(){
+            return setState(-module.getWheelPosition(), module.getModuleRotation());
+        }
+        public SwerveModuleState setState(double wheel, double pod){
+            wheelPos = wheel;
+            podRot = pod;
+            return this;
+        }
+        //TODO add averaging for podrots based off of past values
+        public Vector2d calculateDelta(){
+            double oldWheel = wheelPos;
+            update();
+            return Vector2d.polar(wheelPos-oldWheel, podRot);
+        }
     }
 }
