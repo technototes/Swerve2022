@@ -11,6 +11,7 @@ import static org.firstinspires.ftc.teamcode.drive.DriveConstants.kA;
 import static org.firstinspires.ftc.teamcode.drive.DriveConstants.kStatic;
 import static org.firstinspires.ftc.teamcode.drive.DriveConstants.kV;
 
+import androidx.annotation.GuardedBy;
 import androidx.annotation.NonNull;
 
 import com.acmerobotics.dashboard.config.Config;
@@ -28,8 +29,10 @@ import com.acmerobotics.roadrunner.trajectory.constraints.MinVelocityConstraint;
 import com.acmerobotics.roadrunner.trajectory.constraints.ProfileAccelerationConstraint;
 import com.acmerobotics.roadrunner.trajectory.constraints.TrajectoryAccelerationConstraint;
 import com.acmerobotics.roadrunner.trajectory.constraints.TrajectoryVelocityConstraint;
+import com.outoftheboxrobotics.photoncore.PhotonCore;
 import com.qualcomm.hardware.bosch.BNO055IMU;
 import com.qualcomm.hardware.lynx.LynxModule;
+import com.qualcomm.robotcore.eventloop.opmode.LinearOpMode;
 import com.qualcomm.robotcore.hardware.DcMotor;
 import com.qualcomm.robotcore.hardware.HardwareMap;
 import com.qualcomm.robotcore.hardware.PIDFCoefficients;
@@ -49,48 +52,62 @@ import java.util.List;
  */
 @Config
 public class SampleSwerveDrive extends SwerveDrive {
-    public static PIDCoefficients TRANSLATIONAL_PID = new PIDCoefficients(8, 0, 0);
-    public static PIDCoefficients HEADING_PID = new PIDCoefficients(8, 0, 0);
+    public static PIDCoefficients TRANSLATIONAL_PID = new PIDCoefficients(4, 0, 0);
+    public static PIDCoefficients HEADING_PID = new PIDCoefficients(4, 0, 0);
+
+    public static double FL_STATIC = 0.2;
+    public static double FR_STATIC = 0.2;
+    public static double RL_STATIC = 0.2;
+    public static double RR_STATIC = 0.2;
 
     public static double VX_WEIGHT = 1;
     public static double VY_WEIGHT = 1;
     public static double OMEGA_WEIGHT = 1;
 
-    public static double MAX_SERVO = 0.7;
+    public static int MAX_PARALLEL_COMMANDS = 8;
 
-    private TrajectorySequenceRunner trajectorySequenceRunner;
+    private final TrajectorySequenceRunner trajectorySequenceRunner;
 
-    private static final TrajectoryVelocityConstraint VEL_CONSTRAINT = getVelocityConstraint(MAX_VEL, MAX_ANG_VEL, TRACK_WIDTH);
-    private static final TrajectoryAccelerationConstraint ACCEL_CONSTRAINT = getAccelerationConstraint(MAX_ACCEL);
+    private final TrajectoryVelocityConstraint velocityConstraint;
 
-    private TrajectoryFollower follower;
+    private final TrajectoryAccelerationConstraint accelConstraint;
+
+    private final TrajectoryFollower follower;
 
     public SwerveModule leftFrontModule, leftRearModule, rightRearModule, rightFrontModule;
     public List<SwerveModule> modules;
 
+    private final VoltageSensor batteryVoltageSensor;
+
+    public Thread imuThread;
+
+    private final Object IMULock = new Object();
+    private double imuAngle = 0;
+    private double imuAngleVelocity = 0;
+    @GuardedBy("IMULock")
     private BNO055IMU imu;
-    private VoltageSensor batteryVoltageSensor;
 
     public SampleSwerveDrive(HardwareMap hardwareMap) {
         super(kV, kA, kStatic, TRACK_WIDTH);
 
+        velocityConstraint = getVelocityConstraint(MAX_VEL, MAX_ANG_VEL, TRACK_WIDTH);
+        accelConstraint = getAccelerationConstraint(MAX_ACCEL);
+
         follower = new HolonomicPIDVAFollower(TRANSLATIONAL_PID, TRANSLATIONAL_PID, HEADING_PID,
-                new Pose2d(0.5, 0.5, Math.toRadians(5.0)), 0.5);
+                new Pose2d(0.5, 0.5, Math.toRadians(5)), 0);
 
         LynxModuleUtil.ensureMinimumFirmwareVersion(hardwareMap);
 
         batteryVoltageSensor = hardwareMap.voltageSensor.iterator().next();
 
-        for (LynxModule module : hardwareMap.getAll(LynxModule.class)) {
-            module.setBulkCachingMode(LynxModule.BulkCachingMode.AUTO);
-        }
 
         // TODO: adjust the names of the following hardware devices to match your configuration
-        imu = hardwareMap.get(BNO055IMU.class, "imu");
-        BNO055IMU.Parameters parameters = new BNO055IMU.Parameters();
-        parameters.angleUnit = BNO055IMU.AngleUnit.RADIANS;
-        imu.initialize(parameters);
-
+        synchronized (IMULock) {
+            imu = hardwareMap.get(BNO055IMU.class, "imu");
+            BNO055IMU.Parameters parameters = new BNO055IMU.Parameters();
+            parameters.angleUnit = BNO055IMU.AngleUnit.RADIANS;
+            imu.initialize(parameters);
+        }
         // TODO: If the hub containing the IMU you are using is mounted so that the "REV" logo does
         // not face up, remap the IMU axes so that the z-axis points upward (normal to the floor.)
         //
@@ -143,28 +160,54 @@ public class SampleSwerveDrive extends SwerveDrive {
         setLocalizer(new BetterSwerveLocalizer(this::getExternalHeading, leftFrontModule, leftRearModule, rightRearModule, rightFrontModule));
 
         trajectorySequenceRunner = new TrajectorySequenceRunner(follower, HEADING_PID);
+
+        //photon funnies
+        PhotonCore.enable();
+        PhotonCore.CONTROL_HUB.setBulkCachingMode(LynxModule.BulkCachingMode.MANUAL);
+        PhotonCore.experimental.setMaximumParallelCommands(MAX_PARALLEL_COMMANDS);
+
+
+    }
+
+    public void startIMUThread(LinearOpMode opMode) {
+        imuThread = new Thread(() -> {
+            while (!opMode.isStopRequested() && opMode.opModeIsActive()) {
+                synchronized (IMULock) {
+                    imuAngle = imu.getAngularOrientation().firstAngle;
+                    imuAngleVelocity = -imu.getAngularVelocity().xRotationRate;
+                }
+            }
+        });
+        imuThread.start();
     }
 
     public TrajectoryBuilder trajectoryBuilder(Pose2d startPose) {
-        return new TrajectoryBuilder(startPose, VEL_CONSTRAINT, ACCEL_CONSTRAINT);
+        return new TrajectoryBuilder(startPose, velocityConstraint, accelConstraint);
     }
 
     public TrajectoryBuilder trajectoryBuilder(Pose2d startPose, boolean reversed) {
-        return new TrajectoryBuilder(startPose, reversed, VEL_CONSTRAINT, ACCEL_CONSTRAINT);
+        return new TrajectoryBuilder(startPose, reversed, velocityConstraint, accelConstraint);
     }
 
     public TrajectoryBuilder trajectoryBuilder(Pose2d startPose, double startHeading) {
-        return new TrajectoryBuilder(startPose, startHeading, VEL_CONSTRAINT, ACCEL_CONSTRAINT);
+        return new TrajectoryBuilder(startPose, startHeading, velocityConstraint, accelConstraint);
     }
 
-    public TrajectorySequenceBuilder trajectorySequenceBuilder(Pose2d startPose) {
+    public static TrajectorySequenceBuilder trajectorySequenceBuilder(Pose2d startPose) {
         return new TrajectorySequenceBuilder(
                 startPose,
-                VEL_CONSTRAINT, ACCEL_CONSTRAINT,
+                getVelocityConstraint(MAX_VEL, MAX_ANG_VEL, TRACK_WIDTH), getAccelerationConstraint(MAX_ACCEL),
                 MAX_ANG_VEL, MAX_ANG_ACCEL
         );
     }
-
+    public static TrajectorySequenceBuilder trajectorySequenceBuilder(Pose2d startPose, double startHeading) {
+        return new TrajectorySequenceBuilder(
+                startPose,
+                startHeading,
+                getVelocityConstraint(MAX_VEL, MAX_ANG_VEL, TRACK_WIDTH), getAccelerationConstraint(MAX_ACCEL),
+                MAX_ANG_VEL, MAX_ANG_ACCEL
+        );
+    }
     public void turnAsync(double angle) {
         trajectorySequenceRunner.followTrajectorySequenceAsync(
                 trajectorySequenceBuilder(getPoseEstimate())
@@ -204,13 +247,17 @@ public class SampleSwerveDrive extends SwerveDrive {
         return trajectorySequenceRunner.getLastPoseError();
     }
 
-    public void update() {
+    public void updateModules(){
         for (SwerveModule m : modules) m.update();
+        PhotonCore.CONTROL_HUB.clearBulkCache();
 
+
+    }
+    public void update() {
+        updateModules();
         updatePoseEstimate();
         DriveSignal signal = trajectorySequenceRunner.update(getPoseEstimate(), getPoseVelocity());
         if (signal != null) setDriveSignal(signal);
-
 
     }
 
@@ -266,14 +313,14 @@ public class SampleSwerveDrive extends SwerveDrive {
     @Override
     public List<Double> getWheelPositions() {
         List<Double> wheelPositions = new ArrayList<>();
-        for(SwerveModule m : modules) wheelPositions.add(m.getWheelPosition());
+        for (SwerveModule m : modules) wheelPositions.add(m.getWheelPosition());
         return wheelPositions;
     }
 
     @Override
     public List<Double> getWheelVelocities() {
         List<Double> wheelVelocities = new ArrayList<>();
-        for(SwerveModule m : modules) wheelVelocities.add(m.getWheelVelocity());
+        for (SwerveModule m : modules) wheelVelocities.add(m.getWheelVelocity());
         return wheelVelocities;
     }
 
@@ -287,7 +334,7 @@ public class SampleSwerveDrive extends SwerveDrive {
 
     @Override
     public double getRawExternalHeading() {
-        return imu.getAngularOrientation().firstAngle;
+        return imuAngle;
     }
 
     @Override
@@ -297,7 +344,8 @@ public class SampleSwerveDrive extends SwerveDrive {
         // expected). This bug does NOT affect orientation. 
         //
         // See https://github.com/FIRST-Tech-Challenge/FtcRobotController/issues/251 for details.
-        return (double) -imu.getAngularVelocity().xRotationRate;
+        return imuAngleVelocity;
+
     }
 
     public static TrajectoryVelocityConstraint getVelocityConstraint(double maxVel, double maxAngularVel, double trackWidth) {
@@ -315,7 +363,7 @@ public class SampleSwerveDrive extends SwerveDrive {
     @Override
     public List<Double> getModuleOrientations() {
         List<Double> moduleOrientations = new ArrayList<>();
-        for(SwerveModule m : modules) moduleOrientations.add(m.getModuleRotation());
+        for (SwerveModule m : modules) moduleOrientations.add(m.getModuleRotation());
 
         return moduleOrientations;
     }

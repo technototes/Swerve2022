@@ -21,18 +21,16 @@ public class SplineTest extends LinearOpMode {
 
         waitForStart();
 
+        drive.startIMUThread(this);
         if (isStopRequested()) return;
-
-        TrajectorySequence traj = drive.trajectorySequenceBuilder(new Pose2d())
-
+            TrajectorySequence traj = SampleSwerveDrive.trajectorySequenceBuilder(new Pose2d())
                 .splineToConstantHeading(new Vector2d(30, 30),  0)
-                .lineToSplineHeading(new Pose2d(5, 30, Math.toRadians(180)))
-                .lineToSplineHeading(new Pose2d(30, 5, Math.toRadians(0)))
                 .setReversed(true)
                 .splineToConstantHeading(new Vector2d(0, 0), Math.toRadians(180))
                 .build();
 
         drive.followTrajectorySequence(traj);
+
 
     }
 }

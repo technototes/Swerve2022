@@ -1,10 +1,9 @@
 package org.firstinspires.ftc.teamcode.drive.opmode;
 
 import com.acmerobotics.dashboard.FtcDashboard;
-import com.acmerobotics.dashboard.canvas.Canvas;
 import com.acmerobotics.dashboard.config.Config;
 import com.acmerobotics.dashboard.telemetry.MultipleTelemetry;
-import com.acmerobotics.dashboard.telemetry.TelemetryPacket;
+import com.acmerobotics.roadrunner.control.PIDCoefficients;
 import com.acmerobotics.roadrunner.control.PIDFController;
 import com.acmerobotics.roadrunner.geometry.Pose2d;
 import com.acmerobotics.roadrunner.geometry.Vector2d;
@@ -13,10 +12,9 @@ import com.qualcomm.robotcore.eventloop.opmode.LinearOpMode;
 import com.qualcomm.robotcore.eventloop.opmode.TeleOp;
 import com.qualcomm.robotcore.hardware.DcMotor;
 import com.qualcomm.robotcore.util.ElapsedTime;
+import com.qualcomm.robotcore.util.Range;
 
-import org.firstinspires.ftc.teamcode.drive.SampleMecanumDrive;
 import org.firstinspires.ftc.teamcode.drive.SampleSwerveDrive;
-import org.firstinspires.ftc.teamcode.util.DashboardUtil;
 
 /**
  * This is a simple teleop routine for testing localization. Drive the robot around like a normal
@@ -27,48 +25,50 @@ import org.firstinspires.ftc.teamcode.util.DashboardUtil;
  */
 @Config
 @TeleOp(group = "drive")
-public class LocalizationTest extends LinearOpMode {
+public class VeerControlsTest extends LinearOpMode {
+    public static PIDCoefficients HEADING_COEFFS = new PIDCoefficients(0.5, 0, 0);
     @Override
     public void runOpMode() throws InterruptedException {
         SampleSwerveDrive drive = new SampleSwerveDrive(hardwareMap);
 
         drive.setMode(DcMotor.RunMode.RUN_WITHOUT_ENCODER);
-        drive.setZeroPowerBehavior(DcMotor.ZeroPowerBehavior.FLOAT);
+        drive.setZeroPowerBehavior(DcMotor.ZeroPowerBehavior.BRAKE);
 
         telemetry = new MultipleTelemetry(telemetry, FtcDashboard.getInstance().getTelemetry());
 
-        waitForStart();
-        drive.startIMUThread(this);
         ElapsedTime t = new ElapsedTime();
+        PIDFController headingController = new PIDFController(HEADING_COEFFS);
+        waitForStart();
+
+
+        drive.startIMUThread(this);
+
+        double target = 0;
 
         while (!isStopRequested()) {
+            double current = drive.getExternalHeading();
+            if(Math.abs(gamepad1.right_stick_x) > 0.2 || Math.abs(gamepad1.right_stick_y) > 0.2){
+                target = Angle.norm(-Math.atan2(gamepad1.right_stick_y, gamepad1.right_stick_x)-Math.PI/2);
+                headingController.setTargetPosition(target);
+            }
+            if (current - target > Math.PI) current -= (2 * Math.PI);
+            else if (target - current > Math.PI) current += (2 * Math.PI);
             drive.setWeightedDrivePower(
                     new Pose2d(
                             new Vector2d(
                             -gamepad1.left_stick_y,
                             -gamepad1.left_stick_x
-                                    ).rotated(-drive.getExternalHeading()),
-                             -gamepad1.right_stick_x
+                                    ).rotated(-current),
+                            headingController.update(current)
                     )
             );
             if(gamepad1.right_stick_button) drive.setExternalHeading(0);
 
-            drive.update();
+            drive.updateModules();
 
-            Pose2d poseEstimate = drive.getPoseEstimate();
             telemetry.addData("looptime",1/t.seconds());
             t.reset();
-            telemetry.addData("x", poseEstimate.getX());
-            telemetry.addData("y", poseEstimate.getY());
-            telemetry.addData("heading", poseEstimate.getHeading());
-            telemetry.addData("current", drive.rightFrontModule.getModuleRotation());
-            telemetry.addData("target", drive.rightFrontModule.getTargetRotation());
-//            telemetry.addData("imuuuu", drive.getRawExternalHeading());
-//            TelemetryPacket packet = new TelemetryPacket();
-//            Canvas fieldOverlay = packet.fieldOverlay();
-//
-//            DashboardUtil.drawRobot(fieldOverlay, poseEstimate);
-//            FtcDashboard.getInstance().sendTelemetryPacket(packet);
+
             telemetry.update();
         }
     }
