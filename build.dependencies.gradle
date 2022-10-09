@@ -11,7 +11,8 @@ repositories {
 
 dependencies {
 
-    implementation 'com.github.Eeshwar-Krishnan:PhotonFTC:dev-SNAPSHOT'
+    // implementation 'com.github.Eeshwar-Krishnan:PhotonFTC:dev-SNAPSHOT'
+    implementation 'com.github.Eeshwar-Krishnan:PhotonFTC:v2.0.1'
 
     implementation 'org.firstinspires.ftc:Inspection:7.1.0'
     implementation 'org.firstinspires.ftc:Blocks:7.1.0'
